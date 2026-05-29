@@ -1,0 +1,26 @@
+name: ikuuu 每日签到
+
+on:
+  schedule:
+    # 北京时间每天 08:00 (UTC 0:00)
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: pip install requests
+
+      - name: 执行签到
+        env:
+          IKUUU_COOKIE: ${{ secrets.IKUUU_COOKIE }}
+        run: python checkin.py
