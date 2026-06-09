@@ -39,13 +39,13 @@ Cookie 过期时脚本会自动重新登录，无需手动更新。
 
 3. **启用 Actions**：仓库的 Actions 标签页 → 启用
 
-4. 之后每天北京时间 08:00 会自动登录并签到，Cookie 过期也会自动重新登录
+4. 之后每天北京时间 06:00 会自动登录并签到，Cookie 过期也会自动重新登录
 
 ### 兼容旧版 Cookie 方式
 
 如果仍然希望使用 Cookie（不存密码），可以：
-- 配置 `IKUUU_COOKIE` Secret (或本地 `config.json` 的 `cookie` 字段)
-- 脚本会优先使用已有 Cookie，过期后会自动回退到账号密码登录
+- 配置 `IKUUU_COOKIE` Secret（或本地 `config.json` 的 `cookie` 字段）
+- 脚本会优先使用已有 Cookie，过期后自动回退到账号密码登录
 
 ## 文件说明
 
@@ -63,7 +63,7 @@ Cookie 过期时脚本会自动重新登录，无需手动更新。
 A: 说明今天已经签到成功，无需重复操作。
 
 **Q: 登录失败怎么办？**
-A: 脚本会自动尝试定位登录页的输入框和按钮。如果网站改版导致登录失败，请检查 `login.py` 中的选择器是否需要更新。
+A: 脚本会自动尝试定位登录页的输入框和按钮。如果网站改版导致登录失败，请检查 `login.py` 中的选择器是否需要更新。如果登录页有验证码（Cloudflare Turnstile 等），需要在本地有头模式下手动完成验证。
 
 **Q: 可以在本地不装浏览器运行吗？**
-A: 装好 `playwright` 和 `chromium` 即可。如果不想装浏览器，也可以用旧版 Cookie 方式（`config.json` 中填 `cookie` 字段）。
+A: 装好 `playwright` 和 `chromium` 即可。如果不想装浏览器，也可以用旧版 Cookie 方式（`config.json` 中填 `cookie` 字段），但 Cookie 过期后需要手动更新。

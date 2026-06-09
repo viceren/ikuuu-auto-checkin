@@ -4,30 +4,37 @@ ikuuu 自动登录 - Playwright 浏览器自动化
 """
 import asyncio, json, os, sys
 
+BASE_URL = 'https://ikuuu.win'
+LOGIN_URL = f'{BASE_URL}/auth/login'
 
-def _get_credentials():
-    """从 config.json 或环境变量获取账号密码"""
+
+def get_credentials():
+    """
+    从环境变量或 config.json 读取账号密码和 Cookie。
+    返回 (email, password, cookie_str)，缺失的字段为空字符串。
+    """
     email = os.environ.get('IKUUU_EMAIL', '')
     password = os.environ.get('IKUUU_PASSWORD', '')
+    cookie_str = os.environ.get('IKUUU_COOKIE', '')
 
     if email and password:
-        return email, password
+        return email, password, cookie_str
 
     try:
         with open('config.json', 'r', encoding='utf-8') as f:
             config = json.load(f)
-        email = config.get('email', '') or config.get('username', '')
-        password = config.get('password', '') or config.get('passwd', '')
+        email = email or config.get('email', '') or config.get('username', '')
+        password = password or config.get('password', '') or config.get('passwd', '')
+        cookie_str = cookie_str or config.get('cookie', '') or config.get('cookie_str', '')
     except FileNotFoundError:
         pass
 
-    return email, password
+    return email, password, cookie_str
 
 
 async def login_and_get_cookie(
     email: str = None,
     password: str = None,
-    login_url: str = 'https://ikuuu.win/auth/login',
     headless: bool = True,
     timeout: int = 30000,
 ) -> str:
@@ -37,7 +44,6 @@ async def login_and_get_cookie(
     参数:
         email: 账号，不传则从 config.json / 环境变量读取
         password: 密码，不传则从 config.json / 环境变量读取
-        login_url: 登录页地址
         headless: 是否无头模式（CI 必须 True）
         timeout: 超时（毫秒）
 
@@ -46,7 +52,7 @@ async def login_and_get_cookie(
     """
     # 获取凭据
     if not email or not password:
-        e, p = _get_credentials()
+        e, p, _ = get_credentials()
         email = email or e
         password = password or p
 
@@ -59,7 +65,6 @@ async def login_and_get_cookie(
     from playwright.async_api import async_playwright
 
     async with async_playwright() as p:
-        # 启动浏览器
         browser = await p.chromium.launch(
             headless=headless,
             args=[
@@ -79,8 +84,8 @@ async def login_and_get_cookie(
 
         try:
             # 访问登录页
-            print(f'[login] 访问登录页: {login_url}')
-            await page.goto(login_url, timeout=timeout, wait_until='networkidle')
+            print(f'[login] 访问登录页: {LOGIN_URL}')
+            await page.goto(LOGIN_URL, timeout=timeout, wait_until='networkidle')
 
             # 等待页面加载
             await page.wait_for_timeout(2000)
@@ -118,7 +123,6 @@ async def login_and_get_cookie(
                     break
 
             if not email_input or not pwd_input:
-                # 兜底：打印页面内容帮助调试
                 html = await page.content()
                 print(f'[login] 未找到输入框，页面HTML(前2000字符):\n{html[:2000]}')
                 raise Exception('无法定位登录输入框')
@@ -150,34 +154,36 @@ async def login_and_get_cookie(
                     break
 
             if not submit_btn:
-                # 尝试按回车键
                 print('[login] 未找到登录按钮，尝试回车提交')
                 await page.keyboard.press('Enter')
             else:
                 await submit_btn.click()
 
-            # 等待登录完成（跳转或 API 返回）
-            await page.wait_for_timeout(5000)
-
-            # 检查是否登录成功（URL 变化或页面出现特定内容）
-            current_url = page.url
-            print(f'[login] 登录后 URL: {current_url}')
-
-            # 如果还在登录页，可能是验证码或登录失败
-            if '/auth/login' in current_url:
-                body_text = await page.inner_text('body')
-                print(f'[login] 登录后页面内容(前500字):\n{body_text[:500]}')
-                raise Exception('登录失败，页面未跳转（可能是验证码或账号密码错误）')
+            # 等待登录完成：URL 跳转离开登录页，或超时
+            try:
+                await page.wait_for_url(
+                    lambda url: '/auth/login' not in url,
+                    timeout=15000,
+                )
+                print(f'[login] 登录后 URL: {page.url}')
+            except Exception:
+                # 超时未跳转，说明可能登录失败或有验证码
+                current_url = page.url
+                print(f'[login] 等待跳转超时，当前 URL: {current_url}')
+                if '/auth/login' in current_url:
+                    body_text = await page.inner_text('body')
+                    print(f'[login] 页面内容(前500字):\n{body_text[:500]}')
+                    raise Exception('登录失败，页面未跳转（可能是验证码或账号密码错误）')
 
             # 提取 Cookie
             cookies = await context.cookies()
             cookie_str = '; '.join(f'{c["name"]}={c["value"]}' for c in cookies)
             print(f'[login] 登录成功! Cookie 字段: {[c["name"] for c in cookies]}')
 
-            # 额外验证：访问 /user 确认 Cookie 有效
+            # 验证 Cookie 有效性
             print('[login] 验证 Cookie...')
             user_page = await context.new_page()
-            await user_page.goto('https://ikuuu.win/user', timeout=15000, wait_until='domcontentloaded')
+            await user_page.goto(f'{BASE_URL}/user', timeout=15000, wait_until='domcontentloaded')
             user_url = user_page.url
             if '/auth/login' in user_url:
                 raise Exception('登录后 Cookie 无效，仍被重定向到登录页')

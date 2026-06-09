@@ -4,30 +4,15 @@ ikuuu 自动签到 - 账号密码版
 自动登录获取 Cookie 并执行签到
 Cookie 过期时自动重新登录
 """
-import requests, json, sys, os, asyncio
+import requests, sys, os, asyncio
 from datetime import datetime
+
+BASE_URL = 'https://ikuuu.win'
 
 
 def log(msg):
     t = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     print(f'[{t}] {msg}')
-
-
-def get_config():
-    """从 config.json 和环境变量读取配置"""
-    config = {}
-    try:
-        with open('config.json', 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    except FileNotFoundError:
-        pass
-
-    # 环境变量优先
-    config['email'] = os.environ.get('IKUUU_EMAIL', '') or config.get('email', '') or config.get('username', '')
-    config['password'] = os.environ.get('IKUUU_PASSWORD', '') or config.get('password', '') or config.get('passwd', '')
-    config['cookie'] = os.environ.get('IKUUU_COOKIE', '') or config.get('cookie', '') or config.get('cookie_str', '')
-
-    return config
 
 
 def parse_cookie(cookie_str):
@@ -44,31 +29,47 @@ def parse_cookie(cookie_str):
 def validate_cookie(sess):
     """验证 Cookie 是否有效，返回 True/False"""
     try:
-        r = sess.get('https://ikuuu.win/user', timeout=15, allow_redirects=False)
-        if r.status_code in (302, 301) or 'login' in r.headers.get('Location', ''):
+        r = sess.get(f'{BASE_URL}/user', timeout=15, allow_redirects=False)
+        location = r.headers.get('Location', '')
+        if r.status_code in (302, 301) and 'login' in location:
             return False
-        return True
+        if r.status_code == 200:
+            return True
+        # 其他情况（如 403）视为无效
+        return False
     except Exception:
         return False
 
 
 def do_checkin(sess):
     """执行签到，返回结果信息"""
-    r = sess.post('https://ikuuu.win/user/checkin', timeout=15)
+    r = sess.post(f'{BASE_URL}/user/checkin', timeout=15)
     return r.json()
 
 
 def main():
-    config = get_config()
     sess = requests.Session()
     sess.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Origin': 'https://ikuuu.win',
-        'Referer': 'https://ikuuu.win/user',
+        'Origin': BASE_URL,
+        'Referer': f'{BASE_URL}/user',
         'X-Requested-With': 'XMLHttpRequest',
     })
 
-    cookie_str = config.get('cookie', '')
+    # 读取凭据：环境变量优先，其次 config.json
+    email = os.environ.get('IKUUU_EMAIL', '')
+    password = os.environ.get('IKUUU_PASSWORD', '')
+    cookie_str = os.environ.get('IKUUU_COOKIE', '')
+
+    if not email or not password or not cookie_str:
+        try:
+            from login import get_credentials
+            c_email, c_password, c_cookie = get_credentials()
+            email = email or c_email
+            password = password or c_password
+            cookie_str = cookie_str or c_cookie
+        except ImportError:
+            pass
 
     # 尝试已有 Cookie
     if cookie_str:
@@ -85,9 +86,6 @@ def main():
 
     # Cookie 无效或不存在，自动登录
     if not cookie_str:
-        email = config.get('email', '')
-        password = config.get('password', '')
-
         if not email or not password:
             log('错误: 未提供账号密码（config.json 中设置 email/password，'
                 '或设置 IKUUU_EMAIL / IKUUU_PASSWORD 环境变量）')
