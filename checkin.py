@@ -1,10 +1,9 @@
 """
-ikuuu 自动签到 - 账号密码版
-支持从 config.json 或环境变量读取账号密码
-自动登录获取 Cookie 并执行签到
-Cookie 过期时自动重新登录
+ikuuu 自动签到 - Cookie 版
+从 config.json 或环境变量读取 Cookie，直接签到
+Cookie 过期时需手动更新，不再自动登录
 """
-import requests, sys, os, asyncio
+import requests, sys, os
 from datetime import datetime
 
 BASE_URL = 'https://ikuuu.win'
@@ -26,6 +25,23 @@ def parse_cookie(cookie_str):
     return cookies
 
 
+def get_cookie():
+    """从环境变量或 config.json 读取 Cookie 字符串"""
+    cookie_str = os.environ.get('IKUUU_COOKIE', '')
+    if cookie_str:
+        return cookie_str
+
+    try:
+        import json
+        with open('config.json', 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        cookie_str = config.get('cookie', '') or config.get('cookie_str', '')
+    except FileNotFoundError:
+        pass
+
+    return cookie_str
+
+
 def validate_cookie(sess):
     """验证 Cookie 是否有效，返回 True/False"""
     try:
@@ -35,7 +51,6 @@ def validate_cookie(sess):
             return False
         if r.status_code == 200:
             return True
-        # 其他情况（如 403）视为无效
         return False
     except Exception:
         return False
@@ -48,67 +63,31 @@ def do_checkin(sess):
 
 
 def main():
+    # 读取 Cookie
+    cookie_str = get_cookie()
+    if not cookie_str:
+        log('错误: 未提供 Cookie（设置 IKUUU_COOKIE 环境变量，或在 config.json 中填入 cookie 字段）')
+        sys.exit(1)
+
     sess = requests.Session()
     sess.headers.update({
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Origin': BASE_URL,
         'Referer': f'{BASE_URL}/user',
         'X-Requested-With': 'XMLHttpRequest',
     })
 
-    # 读取凭据：环境变量优先，其次 config.json
-    email = os.environ.get('IKUUU_EMAIL', '')
-    password = os.environ.get('IKUUU_PASSWORD', '')
-    cookie_str = os.environ.get('IKUUU_COOKIE', '')
+    cookies = parse_cookie(cookie_str)
+    sess.cookies.update(cookies)
+    log(f'使用 Cookie: email={cookies.get("email", "?")}')
 
-    if not email or not password or not cookie_str:
-        try:
-            from login import get_credentials
-            c_email, c_password, c_cookie = get_credentials()
-            email = email or c_email
-            password = password or c_password
-            cookie_str = cookie_str or c_cookie
-        except ImportError:
-            pass
+    # 验证 Cookie
+    if not validate_cookie(sess):
+        log('Cookie 已失效，请手动更新 Cookie（浏览器登录后从开发者工具复制）')
+        sys.exit(1)
 
-    # 尝试已有 Cookie
-    if cookie_str:
-        cookies = parse_cookie(cookie_str)
-        sess.cookies.update(cookies)
-        log(f'尝试已有 Cookie: email={cookies.get("email", "?")}')
-
-        if validate_cookie(sess):
-            log('Cookie 有效 ✓')
-        else:
-            log('Cookie 已过期，将重新登录...')
-            cookie_str = ''  # 清空，触发登录流程
-            sess.cookies.clear()
-
-    # Cookie 无效或不存在，自动登录
-    if not cookie_str:
-        if not email or not password:
-            log('错误: 未提供账号密码（config.json 中设置 email/password，'
-                '或设置 IKUUU_EMAIL / IKUUU_PASSWORD 环境变量）')
-            sys.exit(1)
-
-        log(f'自动登录: {email}')
-        try:
-            from login import login_and_get_cookie
-            new_cookie = asyncio.run(login_and_get_cookie(
-                email=email,
-                password=password,
-                headless=True,
-            ))
-        except ImportError:
-            log('错误: 缺少 login.py，请确保 login.py 在同一目录')
-            sys.exit(1)
-        except Exception as e:
-            log(f'自动登录失败: {e}')
-            sys.exit(1)
-
-        cookies = parse_cookie(new_cookie)
-        sess.cookies.update(cookies)
-        log(f'登录成功! email={cookies.get("email", "?")}')
+    log('Cookie 有效 ✓')
 
     # 执行签到
     log('执行签到...')

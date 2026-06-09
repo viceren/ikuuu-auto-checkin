@@ -2,58 +2,52 @@
 
 ## 原理
 
-使用 Playwright 浏览器自动化登录 ikuuu，自动获取 Cookie 后通过 requests 库向 `https://ikuuu.win/user/checkin` 发送 POST 请求完成签到。
+使用 Cookie 直接向 `https://ikuuu.win/user/checkin` 发送 POST 请求完成签到，无需浏览器自动化。
 
-Cookie 过期时脚本会自动重新登录，无需手动更新。
+Cookie 需要从浏览器手动获取并配置，过期后需手动更新。
 
 ## 使用方式
 
 ### 方式一：本地运行
 
-1. **配置账号**：在 `config.json` 中填入账号密码：
-   ```json
-   {
-       "email": "your@email.com",
-       "password": "your_password"
-   }
-   ```
+1. **获取 Cookie**：在浏览器登录 ikuuu，打开开发者工具（F12）→ Application → Cookies → `ikuuu.win`，复制所有 Cookie 拼成字符串（格式：`key1=value1; key2=value2`）
 
-2. **安装依赖**：
-   ```bash
-   pip install requests playwright
-   python -m playwright install chromium
-   ```
+2. **配置 Cookie**：在 `config.json` 中填入 Cookie：
+```json
+{
+  "cookie": "email=xxx; session=xxx; ..."
+}
+```
 
-3. **运行签到**：
-   ```bash
-   python checkin.py
-   ```
+3. **安装依赖**：
+```bash
+pip install requests
+```
+
+4. **运行签到**：
+```bash
+python checkin.py
+```
 
 ### 方式二：GitHub Actions 自动签到
 
 1. **Fork 或推送**本仓库到 GitHub
 
-2. **设置 Secrets**：在 GitHub 仓库 Settings → Secrets and variables → Actions → New repository secret：
-   - `IKUUU_EMAIL` — 登录邮箱
-   - `IKUUU_PASSWORD` — 登录密码
+2. **设置 Secret**：在 GitHub 仓库 Settings → Secrets and variables → Actions → New repository secret：
+   - `IKUUU_COOKIE` — 浏览器登录后复制的完整 Cookie 字符串
 
 3. **启用 Actions**：仓库的 Actions 标签页 → 启用
 
-4. 之后每天北京时间 06:00 会自动登录并签到，Cookie 过期也会自动重新登录
+4. 之后每天北京时间 06:00 会自动签到
 
-### 兼容旧版 Cookie 方式
-
-如果仍然希望使用 Cookie（不存密码），可以：
-- 配置 `IKUUU_COOKIE` Secret（或本地 `config.json` 的 `cookie` 字段）
-- 脚本会优先使用已有 Cookie，过期后自动回退到账号密码登录
+> **Cookie 过期后**需要重新从浏览器获取并更新 `IKUUU_COOKIE` Secret。
 
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
-| `checkin.py` | 签到主程序（集成自动登录） |
-| `login.py` | Playwright 自动登录模块 |
-| `config.json` | 本地配置文件（已加入 .gitignore，存 email/password） |
+| `checkin.py` | 签到主程序（纯 Cookie 签到） |
+| `config.json` | 本地配置文件（已加入 .gitignore，存 Cookie） |
 | `.github/workflows/checkin.yml` | GitHub Actions 自动签到配置 |
 | `README.md` | 本文件 |
 
@@ -62,8 +56,8 @@ Cookie 过期时脚本会自动重新登录，无需手动更新。
 **Q: 签到返回 "您似乎已经签到过了"**
 A: 说明今天已经签到成功，无需重复操作。
 
-**Q: 登录失败怎么办？**
-A: 脚本会自动尝试定位登录页的输入框和按钮。如果网站改版导致登录失败，请检查 `login.py` 中的选择器是否需要更新。如果登录页有验证码（Cloudflare Turnstile 等），需要在本地有头模式下手动完成验证。
+**Q: 提示 Cookie 已失效怎么办？**
+A: 重新在浏览器登录 ikuuu，从开发者工具复制新的 Cookie，更新到 `config.json` 或 GitHub Secrets 中的 `IKUUU_COOKIE`。
 
-**Q: 可以在本地不装浏览器运行吗？**
-A: 装好 `playwright` 和 `chromium` 即可。如果不想装浏览器，也可以用旧版 Cookie 方式（`config.json` 中填 `cookie` 字段），但 Cookie 过期后需要手动更新。
+**Q: 如何获取 Cookie？**
+A: 浏览器登录 ikuuu → F12 打开开发者工具 → Application（应用）标签 → 左侧 Cookies → `ikuuu.win` → 选中所有条目，拼成 `name1=value1; name2=value2` 格式的字符串。

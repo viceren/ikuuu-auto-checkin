@@ -2,9 +2,9 @@ name: ikuuu 每日签到
 
 on:
   schedule:
-    # 北京时间每天 08:00 (UTC 0:00)
+    # 北京时间每天 06:00 (UTC 22:00 前一天)
     - cron: '0 22 * * *'
-  workflow_dispatch:  # 支持手动触发
+  workflow_dispatch: # 支持手动触发
 
 jobs:
   checkin:
@@ -18,12 +18,9 @@ jobs:
           python-version: '3.12'
 
       - name: 安装依赖
-        run: |
-          pip install requests playwright
-          python -m playwright install chromium
+        run: pip install requests
 
       - name: 执行签到
         env:
-          IKUUU_EMAIL: ${{ secrets.IKUUU_EMAIL }}
-          IKUUU_PASSWORD: ${{ secrets.IKUUU_PASSWORD }}
+          IKUUU_COOKIE: ${{ secrets.IKUUU_COOKIE }}
         run: python checkin.py
