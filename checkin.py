@@ -52,14 +52,25 @@ def validate_cookie(sess):
         if r.status_code == 200:
             return True
         return False
-    except Exception:
+    except requests.ConnectionError as e:
+        log(f'Cookie 验证网络错误: {e}')
+        return False
+    except requests.Timeout:
+        log('Cookie 验证超时（15s）')
+        return False
+    except requests.RequestException as e:
+        log(f'Cookie 验证请求异常: {e}')
         return False
 
 
 def do_checkin(sess):
     """执行签到，返回结果信息"""
     r = sess.post(f'{BASE_URL}/user/checkin', timeout=15)
-    return r.json()
+    try:
+        return r.json()
+    except ValueError:
+        log(f'签到响应非 JSON (HTTP {r.status_code}): {r.text[:200]}')
+        raise
 
 
 def main():
@@ -105,6 +116,12 @@ def main():
                 log(f'签到失败: {msg}')
         else:
             log(f'未知响应: {result}')
+    except requests.ConnectionError as e:
+        log(f'签到网络错误: {e}')
+        sys.exit(1)
+    except requests.Timeout:
+        log('签到请求超时（15s）')
+        sys.exit(1)
     except Exception as e:
         log(f'签到异常: {e}')
         sys.exit(1)

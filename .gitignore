@@ -1,4 +1,22 @@
+# 配置文件（含 Cookie，禁止提交）
 config.json
+
+# Python 缓存
 __pycache__/
+*.pyc
+*.pyo
+
+# 调试脚本（本地专用）
 debug.py
 debug_captcha.py
+
+# 虚拟环境
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# 环境变量
+.env

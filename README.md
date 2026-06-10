@@ -21,7 +21,7 @@ Cookie 需要从浏览器手动获取并配置，过期后需手动更新。
 
 3. **安装依赖**：
 ```bash
-pip install requests
+pip install -r requirements.txt
 ```
 
 4. **运行签到**：
