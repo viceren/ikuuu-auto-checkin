@@ -1,0 +1,6 @@
+{
+  "email": "",
+  "password": "",
+  "cookie": "",
+  "_comment": "email/password 用于 refresh_cookie.py 半自动登录；cookie 用于 checkin.py 签到。三者均可通过对应环境变量覆盖：IKUUU_EMAIL / IKUUU_PASSWORD / IKUUU_COOKIE"
+}

@@ -2,13 +2,40 @@
 
 ## 原理
 
-使用 Cookie 直接向 `https://ikuuu.win/user/checkin` 发送 POST 请求完成签到，无需浏览器自动化。
+核心签到使用 Cookie 直接向 `https://ikuuu.win/user/checkin` 发送 POST 请求完成，无需浏览器。
 
-Cookie 需要从浏览器手动获取并配置，过期后需手动更新。
+Cookie 可通过**半自动刷新工具**获取：脚本打开浏览器、自动填表，你手动过人机验证，登录后自动提取 Cookie。
 
 ## 使用方式
 
-### 方式一：本地运行
+### 方式一：半自动 Cookie 刷新 + 签到（推荐）
+
+1. **安装依赖**（含 Playwright 浏览器）：
+```bash
+pip install -r requirements.txt
+playwright install chromium
+```
+
+2. **配置账户**：在 `config.json` 中填入邮箱和密码：
+```json
+{
+  "email": "your@email.com",
+  "password": "your_password",
+  "cookie": ""
+}
+```
+
+3. **刷新 Cookie**（打开浏览器，手动过人机验证）：
+```bash
+python refresh_cookie.py
+```
+
+4. **运行签到**：
+```bash
+python checkin.py
+```
+
+### 方式二：纯手动获取 Cookie
 
 1. **获取 Cookie**：在浏览器登录 ikuuu，打开开发者工具（F12）→ Application → Cookies → `ikuuu.win`，复制所有 Cookie 拼成字符串（格式：`key1=value1; key2=value2`）
 
@@ -47,7 +74,8 @@ python checkin.py
 | 文件 | 说明 |
 |------|------|
 | `checkin.py` | 签到主程序（纯 Cookie 签到） |
-| `config.json` | 本地配置文件（已加入 .gitignore，存 Cookie） |
+| `refresh_cookie.py` | 半自动 Cookie 刷新工具（Playwright，需手动过人机验证） |
+| `config.json` | 本地配置文件（已加入 .gitignore，存账户/Cookie） |
 | `.github/workflows/checkin.yml` | GitHub Actions 自动签到配置 |
 | `README.md` | 本文件 |
 
