@@ -8,8 +8,11 @@ ikuuu Cookie 刷新工具 — 半自动模式
   4. 用户在浏览器中手动完成人机验证并点击登录
   5. 脚本检测到登录成功后自动提取 Cookie
   6. 保存到 config.json，更新 checkin.py 可用的 Cookie
+  7. （可选）登录成功后自动回写到 GitHub Actions Secret，
+     免去手动登录 GitHub 配置页粘贴 Cookie 的步骤。
+     需配置环境变量 GH_TOKEN + config.json 的 github.owner/repo。
 
-依赖: playwright (pip install playwright)
+依赖: playwright (pip install playwright), pynacl (用于 Secret 加密)
 """
 
 from __future__ import annotations
@@ -22,6 +25,8 @@ import sys
 from pathlib import Path
 
 from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+
+import sync_secret
 
 # ── 常量 ──────────────────────────────────────────────────
 BASE_URL = os.environ.get("IKUUU_BASE_URL", "https://ikuuu.win")
@@ -247,6 +252,64 @@ async def wait_for_login_success(
 
 
 # ═══════════════════════════════════════════════════════════
+#  GitHub Secret 回写
+# ═══════════════════════════════════════════════════════════
+
+
+async def _maybe_sync_to_github(
+    cookie_str: str, config: dict, cookie_valid: bool
+) -> None:
+    """登录成功后把 Cookie 回写到 GitHub Secret。
+
+    - 未配置 token/仓库时静默跳过（只提示一次如何启用）
+    - cookie 无效时跳过（避免把坏 Cookie 推上去）
+    - auto_sync=True 时直接推；否则交互式询问
+    """
+    ready, hint = sync_secret.check_prerequisites(config)
+    if not ready:
+        logger.info("GitHub Secret 回写未启用：%s", hint)
+        return
+
+    if not cookie_valid:
+        logger.warning("Cookie 未验证有效，跳过 GitHub Secret 回写")
+        return
+
+    gh_cfg = config.get("github", {}) or {}
+    auto_sync = bool(gh_cfg.get("auto_sync", False))
+
+    if not auto_sync:
+        print()
+        print("┌" + "─" * 52 + "┐")
+        print("│  Cookie 已刷新，是否回写到 GitHub Secret？".ljust(51) + "│")
+        print("│  （回写后 Actions 下次签到自动用新 Cookie）".ljust(51) + "│")
+        print("└" + "─" * 52 + "┘")
+        try:
+            answer = input(">>> 回写？[Y/n]: ").strip().lower()
+        except EOFError:
+            answer = "n"
+        if answer in ("n", "no"):
+            logger.info("已跳过 GitHub Secret 回写")
+            return
+
+    owner_repo = sync_secret.get_repo_slug(config)
+    secret_name = gh_cfg.get("secret_name", sync_secret.DEFAULT_SECRET_NAME)
+    if owner_repo:
+        logger.info(
+            "开始回写 → %s/%s 的 Secret `%s`",
+            owner_repo[0], owner_repo[1], secret_name,
+        )
+
+    # sync_secret 是同步阻塞调用，放到线程里跑避免阻塞事件循环
+    ok, msg = await asyncio.to_thread(
+        sync_secret.push_cookie_secret, cookie_str, config, secret_name
+    )
+    if ok:
+        logger.info(msg)
+    else:
+        logger.error("✗ GitHub Secret 回写失败: %s", msg)
+
+
+# ═══════════════════════════════════════════════════════════
 #  主流程
 # ═══════════════════════════════════════════════════════════
 
@@ -374,12 +437,14 @@ async def refresh_cookie() -> int:
         # ── 8. 验证 Cookie 有效性 ──
         logger.info("-" * 40)
         logger.info("验证 Cookie 有效性...")
+        cookie_valid = False
         try:
             resp = await page.request.get(USER_URL, max_redirects=0)
             if resp.status == 200:
                 text = await resp.text()
                 if "login" not in text.lower() or 'class="login' not in text.lower():
                     logger.info("✓ Cookie 有效！当前保持登录状态")
+                    cookie_valid = True
                 else:
                     logger.warning("⚠ 页面仍包含登录表单，Cookie 可能无效")
             elif resp.status in (301, 302):
@@ -388,10 +453,14 @@ async def refresh_cookie() -> int:
                     logger.warning("⚠ 被重定向到登录页，Cookie 可能无效")
                 else:
                     logger.info("重定向到 %s", location)
+                    cookie_valid = True
             else:
                 logger.warning("⚠ 用户页面返回 HTTP %d", resp.status)
         except Exception as e:
             logger.warning("⚠ Cookie 验证请求失败: %s", e)
+
+        # ── 8b. 回写 GitHub Secret（方案 B 核心步骤） ──
+        await _maybe_sync_to_github(cookie_str, config, cookie_valid)
 
         # ── 9. 完成 ──
         await asyncio.sleep(2)
@@ -403,6 +472,9 @@ async def refresh_cookie() -> int:
     print()
     print("   现在可以运行签到:")
     print("   python checkin.py")
+    print()
+    print("   若已配置 GitHub Token，Cookie 已自动回写到")
+    print("   GitHub Actions Secret，CI 下次签到自动生效。")
     print("=" * 56)
     print()
 

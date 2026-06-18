@@ -2,5 +2,13 @@
   "email": "",
   "password": "",
   "cookie": "",
+  "github": {
+    "_comment": "用于 refresh_cookie.py 登录成功后自动回写 IKUUU_COOKIE Secret；不填则跳过回写，仍可手动管理",
+    "owner": "viceren",
+    "repo": "ikuuu-auto-checkin",
+    "token_env": "GH_TOKEN",
+    "auto_sync": false,
+    "secret_name": "IKUUU_COOKIE"
+  },
   "_comment": "email/password 用于 refresh_cookie.py 半自动登录；cookie 用于 checkin.py 签到。三者均可通过对应环境变量覆盖：IKUUU_EMAIL / IKUUU_PASSWORD / IKUUU_COOKIE"
 }

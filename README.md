@@ -4,7 +4,7 @@
 
 核心签到使用 Cookie 直接向 `https://ikuuu.win/user/checkin` 发送 POST 请求完成，无需浏览器。
 
-Cookie 可通过**半自动刷新工具**获取：脚本打开浏览器、自动填表，你手动过人机验证，登录后自动提取 Cookie。
+Cookie 可通过**半自动刷新工具**获取：脚本打开浏览器、自动填表，你手动过人机验证，登录后自动提取 Cookie。配置好 GitHub Token 后，刷新的 Cookie 会**自动回写到 GitHub Actions Secret**，CI 端无需手动更新。
 
 ## 使用方式
 
@@ -56,7 +56,7 @@ pip install -r requirements.txt
 python checkin.py
 ```
 
-### 方式二：GitHub Actions 自动签到
+### 方式三：GitHub Actions 自动签到
 
 1. **Fork 或推送**本仓库到 GitHub
 
@@ -69,14 +69,66 @@ python checkin.py
 
 > **Cookie 过期后**需要重新从浏览器获取并更新 `IKUUU_COOKIE` Secret。
 
+### 方式四：半自动刷新 + 自动回写 Secret（最省心）
+
+把"手动复制 Cookie 到 GitHub 配置页"那一步也省掉：本地刷新 Cookie 后，脚本自动调 GitHub API 把新 Cookie 写入 `IKUUU_COOKIE` Secret，CI 端下次签到自动生效。
+
+**一次性配置：**
+
+1. **创建 GitHub Token**：
+   - Classic PAT：勾选 `repo` scope
+   - 或 Fine-grained PAT：对本仓库授予 `Actions` (Read and write) 权限
+   - 在 https://github.com/settings/tokens 创建
+
+2. **设置环境变量**（不要写进 config.json 明文）：
+```bash
+# Windows CMD
+set GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+
+# PowerShell
+$env:GH_TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
+
+# Linux/macOS
+export GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+3. **配置 config.json 的 github 字段**（仓库也可由 git remote 自动推断，省略 owner/repo）：
+```json
+{
+  "email": "your@email.com",
+  "password": "your_password",
+  "github": {
+    "owner": "viceren",
+    "repo": "ikuuu-auto-checkin",
+    "token_env": "GH_TOKEN",
+    "auto_sync": false,
+    "secret_name": "IKUUU_COOKIE"
+  }
+}
+```
+
+4. **运行刷新**：
+```bash
+python refresh_cookie.py
+```
+登录成功后脚本会询问是否回写，确认后 Cookie 自动同步到 GitHub Secret。设置 `"auto_sync": true` 可跳过确认直接推送。
+
+5. **也可单独推送**已存在 config.json 中的 Cookie：
+```bash
+python sync_secret.py
+```
+
 ## 文件说明
 
 | 文件 | 说明 |
 |------|------|
 | `checkin.py` | 签到主程序（纯 Cookie 签到） |
-| `refresh_cookie.py` | 半自动 Cookie 刷新工具（Playwright，需手动过人机验证） |
+| `refresh_cookie.py` | 半自动 Cookie 刷新工具（Playwright，需手动过人机验证；登录后可自动回写 GitHub Secret） |
+| `sync_secret.py` | GitHub Actions Secret 回写工具（用 PyNaCl 加密后通过 REST API 推送） |
 | `config.json` | 本地配置文件（已加入 .gitignore，存账户/Cookie） |
+| `config.example.json` | 配置示例 |
 | `.github/workflows/checkin.yml` | GitHub Actions 自动签到配置 |
+| `FEASIBILITY_ASSESSMENT.md` | 账号密码登录改造可行性评估 |
 | `README.md` | 本文件 |
 
 ## 常见问题
@@ -85,7 +137,14 @@ python checkin.py
 A: 说明今天已经签到成功，无需重复操作。
 
 **Q: 提示 Cookie 已失效怎么办？**
-A: 重新在浏览器登录 ikuuu，从开发者工具复制新的 Cookie，更新到 `config.json` 或 GitHub Secrets 中的 `IKUUU_COOKIE`。
+A: 重新运行 `python refresh_cookie.py` 刷新；若已配置 GH_TOKEN，新 Cookie 会自动回写到 GitHub Secret，CI 下次签到自动生效。若未配置，需手动更新 `config.json` 或 GitHub Secrets 中的 `IKUUU_COOKIE`。
 
 **Q: 如何获取 Cookie？**
 A: 浏览器登录 ikuuu → F12 打开开发者工具 → Application（应用）标签 → 左侧 Cookies → `ikuuu.win` → 选中所有条目，拼成 `name1=value1; name2=value2` 格式的字符串。
+
+**Q: 为什么不做成完全自动登录？**
+A: ikuuu 使用 Cloudflare Turnstile 行为验证，不是图像验证码（OCR 无效），且 GitHub Actions 数据中心 IP 被 Cloudflare 风控，纯自动化在 CI 不可行。详见 `FEASIBILITY_ASSESSMENT.md`。本地半自动 + Secret 回写是最务实的折中方案。
+
+**Q: GitHub Token 权限报错？**
+A: 写入 Actions Secret 需要对仓库有写入权限。Classic PAT 至少勾选 `repo`；Fine-grained PAT 需授予 `Actions` (Read and write)。若仓库是 fork 来的，还需在 fork 仓库 Settings → Actions → General 开启 workflow 权限。
+
