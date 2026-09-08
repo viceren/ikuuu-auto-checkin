@@ -6,6 +6,12 @@ on:
     - cron: '0 22 * * *'
   workflow_dispatch: # 支持手动触发
 
+# 显式声明 GITHUB_TOKEN 权限，避免受仓库默认 read-only 设置影响
+# （issues: write 是失败通知能创建 issue 的前提）
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   checkin:
     runs-on: ubuntu-latest
@@ -31,11 +37,54 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: '⚠️ ikuuu 签到失败 - ' + new Date().toISOString().slice(0, 10),
-              body: '签到脚本执行失败，可能原因：\n\n1. Cookie 已过期，请更新 `IKUUU_COOKIE` Secret\n2. ikuuu 网站不可达\n\n请检查 [Actions 日志](' +
-                `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}` + ') 获取详情。',
-              labels: ['checkin-failed']
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const date = new Date().toISOString().slice(0, 10);
+            const title = `⚠️ ikuuu 签到失败 - ${date}`;
+            const runUrl = `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              '今日签到脚本执行失败。',
+              '',
+              '**常见原因：**',
+              '1. Cookie 已过期（最常见，约 7 天失效一次）→ 运行 `python refresh_cookie.py` 刷新并回写 Secret',
+              '2. ikuuu 网站不可达 / 被 Cloudflare 拦截',
+              '',
+              `详情见 [Actions 日志](${runUrl})。`
+            ].join('\n');
+
+            // 去重：同一天已有同名 issue 则追加评论，避免重复创建刷屏
+            const { data: openIssues } = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'open',
+              per_page: 30,
             });
+            const dup = openIssues.find(
+              i => !i.pull_request && i.title === title
+            );
+
+            if (dup) {
+              const stamp = new Date().toISOString();
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: dup.number,
+                body: `签到再次失败：${stamp}\n\n${runUrl}`
+              });
+              core.info(`已追加评论到已存在的 issue #${dup.number}`);
+            } else {
+              try {
+                const { data: created } = await github.rest.issues.create({
+                  owner,
+                  repo,
+                  title,
+                  body,
+                });
+                core.info(`已创建失败通知 issue #${created.number}`);
+              } catch (err) {
+                // 兜底：即使 issue 创建失败，也要让失败可见，绝不能静默
+                core.setFailed(
+                  `签到失败，且通知 issue 创建失败（${err.status || 'unknown'}）：${err.message}`
+                );
+              }
+            }
