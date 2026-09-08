@@ -92,11 +92,10 @@ $env:GH_TOKEN = "ghp_xxxxxxxxxxxxxxxxxxxx"
 export GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 ```
 
-3. **配置 config.json 的 github 字段**（仓库也可由 git remote 自动推断，省略 owner/repo）：
+3. **配置 config.json**（仓库可由 git remote 自动推断，owner/repo 可省略）：
 ```json
 {
   "email": "your@email.com",
-  "password": "your_password",
   "github": {
     "owner": "viceren",
     "repo": "ikuuu-auto-checkin",
@@ -107,13 +106,49 @@ export GH_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
 }
 ```
 
-4. **运行刷新**：
+> **安全建议**：密码**不要**写进 `config.json`（明文落盘）。改为设置环境变量：
+> ```bash
+> # Windows CMD
+> set IKUUU_PASSWORD=your_password
+>
+> # PowerShell
+> $env:IKUUU_PASSWORD = "your_password"
+>
+> # Linux/macOS
+> export IKUUU_PASSWORD=your_password
+> ```
+> 或者干脆不配密码——脚本会只填邮箱，密码由你在浏览器里手输。
+
+4. **先自检**（不启动浏览器、不消耗登录，验证 token 与权限是否真的就绪）：
+```bash
+python sync_secret.py --check
+```
+```
+========================================================
+   GitHub 回写链路预检
+========================================================
+
+  · 目标仓库: viceren/ikuuu-auto-checkin
+  · PyNaCl 依赖: 已安装
+  · Token 有效，仓库可访问 ✓
+  · 可读取 Actions 公钥（key_id=568250167242549743）✓
+  · 具备写入 Secret 的权限 ✓
+
+  ✓ GitHub 回写链路就绪
+========================================================
+```
+若 token 失效/权限不足，会明确指出原因（如 `Token 无效（401）`）并给出修复建议。
+这一步能避免"点完验证码才发现推不上去"。
+
+5. **运行刷新**：
 ```bash
 python refresh_cookie.py
 ```
-登录成功后脚本会询问是否回写，确认后 Cookie 自动同步到 GitHub Secret。设置 `"auto_sync": true` 可跳过确认直接推送。
+脚本会在**启动浏览器之前**先做一次链路预检，有问题时提前告警；
+登录成功后询问是否回写，确认后 Cookie 自动同步到 GitHub Secret。
+设置 `"auto_sync": true` 可跳过确认直接推送。
 
-5. **也可单独推送**已存在 config.json 中的 Cookie：
+6. **也可单独推送**已存在 config.json 中的 Cookie：
 ```bash
 python sync_secret.py
 ```

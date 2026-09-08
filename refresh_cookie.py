@@ -340,6 +340,22 @@ async def refresh_cookie() -> int:
             "未在配置或环境变量中找到密码，将仅填入邮箱"
         )
 
+    # ── 1b. GitHub 回写链路预检（开浏览器之前先确认，避免点完验证码才发现推不了）──
+    gh_ready, gh_hint = sync_secret.check_prerequisites(config)
+    if gh_ready:
+        logger.info("检查 GitHub 回写链路...")
+        ok, msg, _ = await asyncio.to_thread(
+            sync_secret.verify_github_access, config
+        )
+        if ok:
+            logger.info("✓ %s（登录后可自动回写 Secret）", msg)
+        else:
+            logger.warning("⚠ GitHub 回写不可用: %s", msg)
+            logger.warning("  本次仍会刷新本地 Cookie，但不会回写到 GitHub")
+    else:
+        logger.info("GitHub Secret 回写未启用：%s", gh_hint)
+        logger.info("（本地 Cookie 刷新不受影响）")
+
     # ── 2. 启动浏览器 ──
     logger.info("正在启动 Chromium 浏览器...")
     async with async_playwright() as p:

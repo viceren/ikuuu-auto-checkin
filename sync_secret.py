@@ -287,7 +287,10 @@ def push_cookie_secret(
 
 
 def check_prerequisites(config: Optional[dict] = None) -> tuple[bool, str]:
-    """快速检查回写前置条件是否就绪。返回 (ready, hint)。"""
+    """快速检查回写前置条件是否就绪（只查本地配置，不发网络请求）。
+
+    返回 (ready, hint)。
+    """
     if config is None:
         config = load_config()
 
@@ -305,14 +308,118 @@ def check_prerequisites(config: Optional[dict] = None) -> tuple[bool, str]:
     return True, "前置条件就绪"
 
 
+def verify_github_access(config: Optional[dict] = None) -> tuple[bool, str, list[str]]:
+    """真实调用 GitHub API 验证 token 有效性与仓库 secrets 权限。
+
+    比 check_prerequisites 更进一步：会实际发请求，确认
+      1. token 能被 GitHub 接受（未过期/未撤销）
+      2. 能访问目标仓库
+      3. 能读取仓库 Actions 公钥 —— 这是写入 Secret 的必要条件
+         （不具备时通常意味着 token 缺少 repo / Actions 写权限）
+
+    注意：本函数只读取，不写入任何数据。
+
+    Returns:
+        (ok, 结论消息, 明细行列表)
+    """
+    details: list[str] = []
+    if config is None:
+        config = load_config()
+
+    token = get_token(config)
+    if not token:
+        return False, "未配置 GitHub Token", ["设置环境变量 GH_TOKEN，或 config.json 的 github.token_env"]
+
+    slug = get_repo_slug(config)
+    if not slug:
+        return False, "无法确定目标仓库", ["配置 config.json 的 github.owner/repo，或 GH_REPOSITORY"]
+    owner, repo = slug
+    details.append(f"目标仓库: {owner}/{repo}")
+
+    try:
+        import nacl  # noqa: F401
+        details.append("PyNaCl 依赖: 已安装")
+    except ImportError:
+        return False, "缺少 PyNaCl 依赖", ["运行: pip install pynacl"]
+
+    # 1) 验证 token + 仓库可达
+    status, _, body = _api_request("GET", f"/repos/{owner}/{repo}", token)
+    if status == 401:
+        return False, "Token 无效（401：已过期或被撤销）", ["重新生成 PAT 并更新 GH_TOKEN"]
+    if status == 403:
+        return False, "Token 无权访问该仓库（403）", ["确认 PAT 具备 repo 权限（或 Actions 读写）"]
+    if status == 404:
+        return False, f"仓库不存在或无权访问（404）: {owner}/{repo}", ["检查 owner/repo 拼写"]
+    if status != 200:
+        return False, f"仓库访问失败（HTTP {status}）", [body.decode("utf-8", "replace")[:200]]
+    details.append("Token 有效，仓库可访问 ✓")
+
+    # 2) 读取 Actions 公钥 —— 写入 Secret 的必要条件
+    status, _, body = _api_request(
+        "GET", f"/repos/{owner}/{repo}/actions/secrets/public-key", token
+    )
+    if status == 200:
+        data = json.loads(body)
+        details.append(f"可读取 Actions 公钥（key_id={data.get('key_id')}）✓")
+        details.append("具备写入 Secret 的权限 ✓")
+        return True, "GitHub 回写链路就绪", details
+    if status in (401, 403):
+        return False, (
+            "Token 缺少写入 Actions Secret 的权限（HTTP %d）" % status
+        ), [
+            "Classic PAT 需勾选 repo；Fine-grained PAT 需授予 Actions(读写)",
+            "另确认仓库 Settings → Actions → Workflow permissions 为 Read and write",
+        ]
+    return False, f"读取仓库公钥失败（HTTP {status}）", [body.decode("utf-8", "replace")[:200]]
+
+
 if __name__ == "__main__":
-    # 直接运行时：读取 config.json 的 cookie 字段并推送
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="GitHub Actions Secret 回写工具",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="只做配置与权限预检（真实调用 GitHub API，不写入任何数据）",
+    )
+    args = parser.parse_args()
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         datefmt="%H:%M:%S",
     )
     cfg = load_config()
+
+    if args.check:
+        print()
+        print("=" * 56)
+        print("   GitHub 回写链路预检")
+        print("=" * 56)
+        print()
+        ok, msg, details = verify_github_access(cfg)
+        for line in details:
+            print(f"  · {line}")
+        print()
+        if ok:
+            print(f"  ✓ {msg}")
+            print()
+            print("  可以正常使用 refresh_cookie.py 的自动回写功能。")
+        else:
+            print(f"  ✗ {msg}")
+            print()
+            print("  修复建议：")
+            for tip in details:
+                print(f"    - {tip}")
+            print()
+            print("  本地 Cookie 刷新仍可使用，只是不会自动回写到 GitHub。")
+        print("=" * 56)
+        print()
+        raise SystemExit(0 if ok else 1)
+
+    # 默认：读取 config.json 的 cookie 字段并推送
     cookie = cfg.get("cookie", "")
     if not cookie:
         logger.error("config.json 中没有 cookie 字段")
