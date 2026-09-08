@@ -1,7 +1,6 @@
-name: 临时告警链路验证
+name: 临时清理
 
-# 一次性验证：确认 GITHUB_TOKEN 是否真的具备 issues: write 权限
-# 验证通过后本文件将被删除
+# 一次性：关闭验证用的测试 issue #1，随后本文件将被删除
 on: push
 
 permissions:
@@ -9,27 +8,20 @@ permissions:
   issues: write
 
 jobs:
-  verify:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: 模拟签到失败
-        run: |
-          echo "故意失败，用于触发通知步骤"
-          exit 1
-
-      - name: 验证通知能否创建 issue
-        if: failure()
+      - name: 关闭测试 issue #1
         uses: actions/github-script@v7
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const title = '[测试] 告警链路验证 - 请忽略';
-            const body = '用于验证工作流 GITHUB_TOKEN 是否具备 issues: write 权限的临时 issue。\n\n' +
-              '看到这条 = 签到失败告警链路已恢复正常。\n\n' +
-              `Run: ${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/${context.runId}`;
-            // 不捕获异常：若权限不足应直接暴露 403
-            const { data: created } = await github.rest.issues.create({
-              owner, repo, title, body
-            });
-            core.info(`✓ 创建成功 issue #${created.number} — GITHUB_TOKEN 具备 issues: write 权限`);
+            try {
+              await github.rest.issues.update({
+                owner, repo, issue_number: 1, state: 'closed'
+              });
+              core.info('✓ 已关闭测试 issue #1');
+            } catch (err) {
+              core.info(`issue #1 已关闭或不存在：${err.message}`);
+            }
