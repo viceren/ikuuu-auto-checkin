@@ -30,6 +30,9 @@ jobs:
         id: checkin
         env:
           IKUUU_COOKIE: ${{ secrets.IKUUU_COOKIE }}
+          # 域名会不定期更换：可在仓库 Variables 设置 IKUUU_BASE_URL 覆盖，
+          # 未设置时回退到代码内置默认值。失效时运行 python find_domain.py 探测。
+          IKUUU_BASE_URL: "${{ vars.IKUUU_BASE_URL || 'https://ikuuu.top' }}"
         run: python checkin.py
 
       - name: 签到失败通知
@@ -45,9 +48,11 @@ jobs:
             const body = [
               '今日签到脚本执行失败。',
               '',
-              '**常见原因：**',
-              '1. Cookie 已过期（最常见，约 7 天失效一次）→ 运行 `python refresh_cookie.py` 刷新并回写 Secret',
-              '2. ikuuu 网站不可达 / 被 Cloudflare 拦截',
+              '**排查顺序：**',
+              '1. **域名是否已更换**（近期高发）→ 运行 `python find_domain.py` 探测最新域名，'
+                + '在仓库 Variables 更新 `IKUUU_BASE_URL`',
+              '2. Cookie 已过期（约 7 天失效一次）→ 运行 `python refresh_cookie.py` 刷新并回写 Secret',
+              '3. 网站不可达 / 风控拦截',
               '',
               `详情见 [Actions 日志](${runUrl})。`
             ].join('\n');

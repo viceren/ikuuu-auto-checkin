@@ -15,7 +15,9 @@ from typing import Optional
 import requests
 
 # ── 可配置常量 ──────────────────────────────────────────────
-BASE_URL = os.environ.get('IKUUU_BASE_URL', 'https://ikuuu.win')
+# 注意：ikuuu 的域名会不定期更换，旧域名会变成一个"最新域名"公告页。
+# 域名变更时用 IKUUU_BASE_URL 环境变量覆盖，或运行 find_domain.py 探测最新域名。
+BASE_URL = os.environ.get('IKUUU_BASE_URL') or 'https://ikuuu.top'
 REQUEST_TIMEOUT = int(os.environ.get('IKUUU_TIMEOUT', '15'))
 MAX_RETRIES = int(os.environ.get('IKUUU_MAX_RETRIES', '3'))
 RETRY_BACKOFF = float(os.environ.get('IKUUU_RETRY_BACKOFF', '2.0'))
@@ -125,7 +127,25 @@ def validate_cookie(sess: requests.Session) -> tuple[bool, str]:
             return False, f'重定向到登录页 (HTTP {r.status_code})'
 
         if r.status_code == 200:
-            text_lower = r.text.lower()
+            # 注意：服务器未在 Content-Type 里声明 charset 时，requests 会按
+            # ISO-8859-1 解码 r.text，中文会变成乱码，导致关键词匹配失效。
+            # 因此这里统一按 UTF-8 解码原始字节再判断。
+            text = r.content.decode('utf-8', errors='replace')
+            text_lower = text.lower()
+
+            # ── 域名失效检测（优先级最高）──
+            # 旧域名会变成一个"最新域名"公告页；此时并非 Cookie 失效，
+            # 而是站点换域名了，处理方式完全不同，必须区分开。
+            if ('最新域名' in text
+                    or '主要域名' in text
+                    or '备用域名' in text):
+                return False, (
+                    '当前域名已失效，返回的是"最新域名"公告页！'
+                    '这不是 Cookie 问题——请更新 BASE_URL：'
+                    '运行 python find_domain.py 探测最新域名，'
+                    '或设置 IKUUU_BASE_URL 环境变量'
+                )
+
             # Cloudflare 拦截检测
             if 'cloudflare' in text_lower and 'just a moment' in text_lower:
                 return False, '被 Cloudflare 拦截（可能需要更换 IP 或等待）'
@@ -218,7 +238,17 @@ def main() -> None:
     valid, diagnostic = validate_cookie(sess)
     if not valid:
         logger.error('Cookie 验证失败: %s', diagnostic)
-        logger.error('请手动更新 Cookie（浏览器登录后从开发者工具复制）')
+        if '域名' in diagnostic:
+            logger.error(
+                '→ 这是域名问题，不是 Cookie 问题：'
+                '运行 python find_domain.py 探测最新域名，'
+                '并更新 IKUUU_BASE_URL'
+            )
+        else:
+            logger.error(
+                '请手动更新 Cookie（运行 python refresh_cookie.py 刷新，'
+                '或在浏览器登录后从开发者工具复制）'
+            )
         sys.exit(1)
     logger.info('Cookie 有效 ✓ (%s)', diagnostic)
 

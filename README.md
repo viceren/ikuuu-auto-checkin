@@ -160,6 +160,7 @@ python sync_secret.py
 | `checkin.py` | 签到主程序（纯 Cookie 签到） |
 | `refresh_cookie.py` | 半自动 Cookie 刷新工具（Playwright，需手动过人机验证；登录后可自动回写 GitHub Secret） |
 | `sync_secret.py` | GitHub Actions Secret 回写工具（用 PyNaCl 加密后通过 REST API 推送） |
+| `find_domain.py` | 域名探测工具（域名变更时用真实浏览器解析发布页，实测可达性并推荐可用域名） |
 | `config.json` | 本地配置文件（已加入 .gitignore，存账户/Cookie） |
 | `config.example.json` | 配置示例 |
 | `.github/workflows/checkin.yml` | GitHub Actions 自动签到配置 |
@@ -167,6 +168,13 @@ python sync_secret.py
 | `README.md` | 本文件 |
 
 ## 常见问题
+
+**Q: 签到突然全部失败，Cookie 也没到期，怎么回事？**
+A: 大概率是**域名变更**——ikuuu 会不定期更换域名，旧域名会变成一个"最新域名"公告页
+（脚本会明确提示 `当前域名已失效，返回的是"最新域名"公告页`，而不是笼统报 Cookie 失效）。
+   - 运行 `python find_domain.py` 探测最新域名（用真实浏览器解析发布页，并实测可达性）
+   - 更新 `IKUUU_BASE_URL`：本地设环境变量，CI 侧在仓库 Settings → Secrets and variables → **Variables** 里设置
+   - **注意**：换域名后旧 Cookie 通常随之失效，需要在**新域名上重新登录**获取新 Cookie
 
 **Q: 签到返回 "您似乎已经签到过了"**
 A: 说明今天已经签到成功，无需重复操作。

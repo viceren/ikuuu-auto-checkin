@@ -29,7 +29,9 @@ from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 import sync_secret
 
 # ── 常量 ──────────────────────────────────────────────────
-BASE_URL = os.environ.get("IKUUU_BASE_URL", "https://ikuuu.win")
+# 注意：ikuuu 的域名会不定期更换，旧域名会变成一个"最新域名"公告页。
+# 域名变更时用 IKUUU_BASE_URL 环境变量覆盖，或运行 find_domain.py 探测最新域名。
+BASE_URL = os.environ.get("IKUUU_BASE_URL") or "https://ikuuu.top"
 LOGIN_URL = f"{BASE_URL}/auth/login"
 USER_URL = f"{BASE_URL}/user"
 CHECKIN_URL = f"{BASE_URL}/user/checkin"
