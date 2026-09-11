@@ -132,6 +132,11 @@ async def is_logged_in(page: Page) -> bool:
 async def detect_captcha(page: Page) -> str | None:
     """检测页面上的验证码类型，返回名称或 None。"""
     checks = [
+        # 极验 Geetest（ikuuu 新站现用）
+        ('.geetest_captcha', "极验 Geetest"),
+        ('[class*="geetest"]', "极验 Geetest"),
+        ('script[src*="gt4.js"]', "极验 Geetest 4"),
+        # Cloudflare Turnstile（旧站曾用）
         ('.cf-turnstile', "Cloudflare Turnstile"),
         ('iframe[src*="turnstile"]', "Cloudflare Turnstile (iframe)"),
         ('iframe[src*="recaptcha"]', "Google reCAPTCHA"),
@@ -316,8 +321,13 @@ async def _maybe_sync_to_github(
 # ═══════════════════════════════════════════════════════════
 
 
-async def refresh_cookie() -> int:
-    """主 Cookie 刷新流程。返回 0 表示成功，非 0 表示失败。"""
+async def refresh_cookie(manual: bool = False) -> int:
+    """主 Cookie 刷新流程。返回 0 表示成功，非 0 表示失败。
+
+    Args:
+        manual: 纯手动模式——不预填账号密码，完全由用户在浏览器中操作。
+                适用于不想把密码写进配置文件或环境变量的场景。
+    """
     print()
     print("=" * 56)
     print("   ikuuu Cookie 刷新工具 — 半自动模式")
@@ -329,18 +339,21 @@ async def refresh_cookie() -> int:
     email = config.get("email", "") or os.environ.get("IKUUU_EMAIL", "")
     password = config.get("password", "") or os.environ.get("IKUUU_PASSWORD", "")
 
-    if not email:
-        logger.error("未配置邮箱")
-        logger.error(
-            "请在 config.json 中添加 email 字段，"
-            "或设置 IKUUU_EMAIL 环境变量"
-        )
-        return 1
+    if manual:
+        logger.info("手动模式：不预填账号密码，请在浏览器里自行完成登录")
+    else:
+        if not email:
+            logger.error("未配置邮箱")
+            logger.error(
+                "请在 config.json 中添加 email 字段，或设置 IKUUU_EMAIL 环境变量；"
+                "也可加 --manual 参数跳过预填、纯手动登录"
+            )
+            return 1
 
-    if not password:
-        logger.warning(
-            "未在配置或环境变量中找到密码，将仅填入邮箱"
-        )
+        if not password:
+            logger.warning(
+                "未在配置或环境变量中找到密码，将仅填入邮箱"
+            )
 
     # ── 1b. GitHub 回写链路预检（开浏览器之前先确认，避免点完验证码才发现推不了）──
     gh_ready, gh_hint = sync_secret.check_prerequisites(config)
@@ -389,15 +402,18 @@ async def refresh_cookie() -> int:
         if await is_logged_in(page):
             logger.info("✓ 检测到已有有效登录会话，直接提取 Cookie")
         elif await is_on_login_page(page):
-            logger.info("检测到登录页面，开始填写表单")
-
-            # 填入邮箱密码
-            await fill_login_form(page, email, password)
+            if manual:
+                logger.info("检测到登录页面（手动模式：不预填账号密码）")
+            else:
+                logger.info("检测到登录页面，开始填写表单")
+                await fill_login_form(page, email, password)
 
             # 检测验证码
             captcha_type = await detect_captcha(page)
             if captcha_type:
                 logger.info("检测到人机验证: %s", captcha_type)
+                if "极验" in captcha_type or "Geetest" in captcha_type:
+                    logger.info("  极验验证通常需要拖拽/点选，请在浏览器中手动完成")
             else:
                 logger.info("未检测到显式人机验证元素")
 
@@ -406,16 +422,20 @@ async def refresh_cookie() -> int:
             print("┌" + "─" * 52 + "┐")
             print("│  请在浏览器窗口中完成以下操作：".ljust(51) + "│")
             print("│".ljust(51) + "│")
-            print("│  1. 完成人机验证（如有）".ljust(51) + "│")
+            if manual:
+                print("│  0. 输入邮箱与密码".ljust(51) + "│")
+            print("│  1. 完成人机验证".ljust(51) + "│")
             print("│  2. 点击登录按钮".ljust(51) + "│")
             print("│".ljust(51) + "│")
             print("│  登录成功后脚本会自动提取 Cookie".ljust(51) + "│")
             print("└" + "─" * 52 + "┘")
             print()
 
-            # 尝试自动点击登录（如果验证码不需要交互）
-            await asyncio.sleep(1)
-            await try_click_login(page)
+            # 尝试自动点击登录（手动模式下必须由用户自行点击，
+            # 因为极验等交互式验证码未通过时点击无效）
+            if not manual:
+                await asyncio.sleep(1)
+                await try_click_login(page)
 
             # 等待登录成功
             if await wait_for_login_success(page):
@@ -504,4 +524,16 @@ async def refresh_cookie() -> int:
 # ═══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
-    sys.exit(asyncio.run(refresh_cookie()))
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="ikuuu Cookie 刷新工具（半自动）",
+    )
+    parser.add_argument(
+        "--manual",
+        action="store_true",
+        help="纯手动模式：不预填账号密码，全部在浏览器里手动完成登录",
+    )
+    args = parser.parse_args()
+
+    sys.exit(asyncio.run(refresh_cookie(manual=args.manual)))
