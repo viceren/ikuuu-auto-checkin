@@ -167,7 +167,25 @@ def validate_cookie(sess: requests.Session) -> tuple[bool, str]:
 
 def do_checkin(sess: requests.Session) -> dict:
     """执行签到，返回签到结果 JSON"""
-    r = request_with_retry('POST', f'{BASE_URL}/user/checkin', sess)
+    # 必须 allow_redirects=False：Cookie 失效时服务端会 302 重定向到登录页，
+    # 若跟随则会拿到登录页 HTML，导致下方 r.json() 抛 ValueError，
+    # 报错退化成含糊的「签到异常: Expecting value」，掩盖真实原因。
+    r = request_with_retry(
+        'POST', f'{BASE_URL}/user/checkin', sess, allow_redirects=False,
+    )
+    if r.status_code in (301, 302):
+        location = r.headers.get('Location', '')
+        if 'login' in location:
+            raise RuntimeError(
+                'Cookie 已失效：签到接口重定向到登录页 (HTTP %d -> %s)。'
+                '请刷新 Cookie：运行 python refresh_cookie.py，'
+                '或在浏览器登录后更新 config.json / IKUUU_COOKIE Secret'
+                % (r.status_code, location)
+            )
+        raise RuntimeError(
+            '签到接口返回非常规重定向 (HTTP %d -> %s)'
+            % (r.status_code, location)
+        )
     try:
         return r.json()  # type: ignore[no-any-return]
     except ValueError:
