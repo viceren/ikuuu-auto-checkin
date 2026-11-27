@@ -56,18 +56,27 @@ pip install -r requirements.txt
 python checkin.py
 ```
 
-### 方式三：GitHub Actions 自动签到
+### 方式三：GitHub Actions 自动签到（推荐，支持 Cookie 自动续期）
 
 1. **Fork 或推送**本仓库到 GitHub
 
-2. **设置 Secret**：在 GitHub 仓库 Settings → Secrets and variables → Actions → New repository secret：
-   - `IKUUU_COOKIE` — 浏览器登录后复制的完整 Cookie 字符串
+2. **设置 Secrets**（Settings → Secrets and variables → Actions）：
+
+   | Secret | 必需 | 说明 |
+   |--------|------|------|
+   | `IKUUU_COOKIE` | 首次可空 | 浏览器登录后的完整 Cookie |
+   | `IKUUU_EMAIL` | 可选 | 账号邮箱 |
+   | `IKUUU_PASSWORD` | 可选 | 账号密码（与邮箱同时配置才启用自动登录） |
 
 3. **启用 Actions**：仓库的 Actions 标签页 → 启用
 
-4. 之后每天北京时间 06:00 会自动签到
+4. 之后每天北京时间 06:00 自动签到
 
-> **Cookie 过期后**需要重新从浏览器获取并更新 `IKUUU_COOKIE` Secret。
+> **配了 `IKUUU_EMAIL` + `IKUUU_PASSWORD` 后**：Cookie 失效时 Actions 会用 CLIP 视觉模型
+> 自动过极验、重新登录，并把新 Cookie 回写到 `IKUUU_COOKIE` Secret —— 不再需要手动更新。
+> 首次运行会下载约 85MB 的模型（之后命中 Actions 缓存，不再重复下载）。
+>
+> 只配 `IKUUU_COOKIE` 时，行为与以前完全一致：纯 Cookie 签到，过期后在 Actions 里报失败。
 
 ### 方式四：半自动刷新 + 自动回写 Secret（最省心）
 
@@ -153,6 +162,55 @@ python refresh_cookie.py
 python sync_secret.py
 ```
 
+### 方式五：本机运行（与 Actions 同一套自动登录能力）
+
+> 与 Actions 共用同一个 `captcha_solver.py`（CLIP 解九宫格），区别只是跑在本机。
+> ⚠️ 自动登录是**与站点风控对抗**，违反 ikuuu 服务条款，存在封号风险；仅用于账号所有者维护自己的签到。
+
+原理：Cookie 失效时，`checkin.py` 自动调 `auto_login.py` → Playwright 打开登录页 →
+`captcha_solver.py` 逐格截取九宫格 → 本地 CLIP 编码 → 在 9 格中找出彼此最相似的 3 个 →
+模拟人类轨迹点击 → 登录 → 新 Cookie 写回 `config.json` 并回写 GitHub Secret。
+
+**1. 下载视觉模型（约 85MB，只需一次）**
+
+```bash
+mkdir -p models
+curl -L -o models/clip_vit_b32_vision_int8.onnx \
+  https://hf-mirror.com/Xenova/clip-vit-base-patch32/resolve/main/onnx/vision_model_int8.onnx
+```
+
+依赖：`pip install -r requirements.txt`（已含 onnxruntime 与 Pillow）。
+
+**2. 提供账号密码（只走环境变量，不要写进 config.json）**
+
+```powershell
+[Environment]::SetEnvironmentVariable("IKUUU_EMAIL","you@example.com","User")
+[Environment]::SetEnvironmentVariable("IKUUU_PASSWORD","your_password","User")
+```
+
+**3. 自检**（不提交登录、不需要真实密码）：
+
+```bash
+python auto_login.py --dry-run
+```
+
+看到「极验已被自动解出」就说明链路通了。
+
+**4. 注册每日任务**（右键以管理员身份运行）：
+
+```bat
+install_task.bat
+```
+
+> 如果 CLIP 在某个题型上判断不准，可切换更强的 provider（可选）：
+> - `IKUUU_VLM_PROVIDER=ollama` + `IKUUU_VLM_MODEL=qwen2.5vl:3b`（需装 Ollama，核显下较慢）
+> - `IKUUU_VLM_PROVIDER=openai` + `IKUUU_VLM_MODEL` / `IKUUU_VLM_BASE_URL` / `IKUUU_VLM_API_KEY`（任意 OpenAI 兼容端点）
+> - `IKUUU_VLM_PROVIDER=manual`（截图后终端输入编号，半自动兜底）
+
+之后每天 06:00 自动签到，日志在 `logs\checkin.log`。也可随时手动跑 `run_checkin.bat`。
+
+> 没有视觉模型时，可设 `IKUUU_VLM_PROVIDER=manual`：脚本截图后在终端等你输入格子编号，属于半自动兜底。
+
 ## 文件说明
 
 | 文件 | 说明 |
@@ -161,6 +219,10 @@ python sync_secret.py
 | `refresh_cookie.py` | 半自动 Cookie 刷新工具（Playwright，需手动过人机验证；登录后可自动回写 GitHub Secret） |
 | `sync_secret.py` | GitHub Actions Secret 回写工具（用 PyNaCl 加密后通过 REST API 推送） |
 | `find_domain.py` | 域名探测工具（域名变更时用真实浏览器解析发布页，实测可达性并推荐可用域名） |
+| `auto_login.py` | 自动登录（Playwright + 极验解题）。Cookie 失效时由 `checkin.py` 调用；`--dry-run` 可自检极验能否被解出 |
+| `captcha_solver.py` | 极验 v4 解题器：题型检测 / 九宫格拼图 / VLM 识别 / 人类轨迹点击（VLM 可插拔：Ollama / OpenAI 兼容 / 人工） |
+| `run_checkin.bat` | 本机签到入口（写日志到 `logs\checkin.log`），供计划任务调用 |
+| `install_task.bat` | 注册 Windows 计划任务（每天 06:00，管理员运行） |
 | `config.json` | 本地配置文件（已加入 .gitignore，存账户/Cookie） |
 | `config.example.json` | 配置示例 |
 | `.github/workflows/checkin.yml` | GitHub Actions 自动签到配置 |
@@ -185,8 +247,16 @@ A: 重新运行 `python refresh_cookie.py` 刷新；若已配置 GH_TOKEN，新 
 **Q: 如何获取 Cookie？**
 A: 浏览器登录 ikuuu → F12 打开开发者工具 → Application（应用）标签 → 左侧 Cookies → `ikuuu.win` → 选中所有条目，拼成 `name1=value1; name2=value2` 格式的字符串。
 
-**Q: 为什么不做成完全自动登录？**
-A: ikuuu 使用 Cloudflare Turnstile 行为验证，不是图像验证码（OCR 无效），且 GitHub Actions 数据中心 IP 被 Cloudflare 风控，纯自动化在 CI 不可行。详见 `FEASIBILITY_ASSESSMENT.md`。本地半自动 + Secret 回写是最务实的折中方案。
+**Q: 为什么 GitHub Actions 里不做完全自动登录？**
+A: 云端不行。ikuuu 自 2026-04 起登录改用 **Geetest v4**（九宫格语义点选 / 文字点选，题型随机），
+   实测**有头 + 真实 Chrome + 真实 GPU + 人类鼠标轨迹**也一律出题——拦截点是站点策略「必须作答」，
+   不是浏览器指纹，所以 xvfb、stealth、UA 对齐这些方向都不必再试；Actions 的数据中心 IP 只会更严。
+   此外 Actions 也跑不动视觉模型。
+   想无人值守只能用**方式五（本机 VLM 解题）**：本机住宅 IP + 本地视觉模型，代价是违反站点 ToS、有封号风险。
+   只想知道当前策略有没有变，跑 `python auto_login.py --dry-run` 即可。
+   若站点策略日后放宽，它会直接报出放行。
+   真要无人值守，只剩付费打码平台一条路（约 $0.0016/次，见 `FEASIBILITY_ASSESSMENT.md`），且违反站点 ToS。
+   **现阶段最务实的仍是：本地半自动刷新 + Secret 回写。**
 
 **Q: GitHub Token 权限报错？**
 A: 写入 Actions Secret 需要对仓库有写入权限。Classic PAT 至少勾选 `repo`；Fine-grained PAT 需授予 `Actions` (Read and write)。若仓库是 fork 来的，还需在 fork 仓库 Settings → Actions → General 开启 workflow 权限。

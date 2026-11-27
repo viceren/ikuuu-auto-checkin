@@ -31,6 +31,14 @@ USER_AGENT = (
 # 签到记录文件（防止同一天重复签到）
 CHECKIN_LOG = Path(__file__).parent / '.checkin_log'
 
+# 自动登录兜底：默认启用（本机与 GitHub Actions 都可）。
+# Actions 上靠 CLIP（88MB，CPU 推理）解九宫格；配了 IKUUU_EMAIL/IKUUU_PASSWORD 才真正生效。
+# 如需关闭，设 IKUUU_AUTO_LOGIN=0。
+AUTO_LOGIN_ENABLED = (
+    os.environ.get('IKUUU_AUTO_LOGIN', '1').strip().lower()
+    not in ('0', 'false', 'no', 'off')
+)
+
 # ── 日志 ─────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -234,6 +242,72 @@ def write_github_summary(lines: list[str]) -> None:
                 f.write(line + '\n')
 
 
+def _persist_cookie(cookie_str: str) -> None:
+    """把新 Cookie 落盘：本地 config.json + GitHub Secret（按可用性）。"""
+    try:
+        import auto_login
+
+        auto_login.save_cookie_to_config(cookie_str)
+    except Exception as e:  # noqa: BLE001
+        logger.warning('写入本地 config.json 失败: %s', e)
+
+    try:
+        import sync_secret
+
+        config = sync_secret.load_config()
+        ready, hint = sync_secret.check_prerequisites(config)
+    except Exception as e:  # noqa: BLE001
+        logger.warning('检查 GitHub 回写条件失败: %s', e)
+        return
+
+    if not ready:
+        logger.info('未回写 GitHub Secret：%s', hint)
+        return
+
+    try:
+        ok, message = sync_secret.push_cookie_secret(cookie_str, config)
+    except Exception as e:  # noqa: BLE001
+        logger.warning('回写 GitHub Secret 异常: %s', e)
+        return
+
+    if ok:
+        logger.info(message)
+    else:
+        logger.error('回写 GitHub Secret 失败: %s', message)
+
+
+def _try_auto_login(diagnostic: str) -> Optional[str]:
+    """Cookie 缺失/失效时尝试自动登录拿新 Cookie；返回新 Cookie 或 None。"""
+    if not AUTO_LOGIN_ENABLED:
+        return None
+    if '域名' in diagnostic:
+        return None
+
+    try:
+        import auto_login
+    except Exception as e:  # noqa: BLE001
+        logger.warning('自动登录模块不可用: %s', e)
+        return None
+
+    email, password = auto_login.load_credentials()
+    if not email or not password:
+        logger.info(
+            '未配置账号密码，跳过自动登录'
+            '（设置 IKUUU_EMAIL / IKUUU_PASSWORD 可启用）'
+        )
+        return None
+
+    logger.info('Cookie 不可用（%s），尝试自动登录刷新...', diagnostic)
+    cookie, message = auto_login.run_login(email, password, BASE_URL)
+    if not cookie:
+        logger.error('自动登录失败: %s', message)
+        return None
+
+    logger.info('✓ 自动登录成功，已获取新 Cookie')
+    _persist_cookie(cookie)
+    return cookie
+
+
 def main() -> None:
     """主签到流程"""
     logger.info('=== ikuuu 自动签到开始 ===')
@@ -241,9 +315,13 @@ def main() -> None:
     # ── 读取 Cookie ──
     cookie_str = get_cookie()
     if not cookie_str:
+        logger.warning('未提供 Cookie，尝试自动登录...')
+        cookie_str = _try_auto_login('未提供 Cookie') or ''
+    if not cookie_str:
         logger.error(
             '未提供 Cookie'
-            '（设置 IKUUU_COOKIE 环境变量，或在 config.json 中填入 cookie 字段）',
+            '（设置 IKUUU_COOKIE 环境变量，或在 config.json 中填入 cookie 字段；'
+            '本机可配置 IKUUU_EMAIL / IKUUU_PASSWORD 启用自动登录）',
         )
         sys.exit(1)
 
@@ -262,12 +340,20 @@ def main() -> None:
                 '运行 python find_domain.py 探测最新域名，'
                 '并更新 IKUUU_BASE_URL'
             )
-        else:
+            sys.exit(1)
+
+        new_cookie = _try_auto_login(diagnostic)
+        if new_cookie:
+            cookie_str = new_cookie
+            sess = build_session(cookie_str)
+            valid, diagnostic = validate_cookie(sess)
+
+        if not valid:
             logger.error(
                 '请手动更新 Cookie（运行 python refresh_cookie.py 刷新，'
                 '或在浏览器登录后从开发者工具复制）'
             )
-        sys.exit(1)
+            sys.exit(1)
     logger.info('Cookie 有效 ✓ (%s)', diagnostic)
 
     # ── 防重复签到 ──

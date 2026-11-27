@@ -23,3 +23,12 @@ venv/
 
 # WorkBuddy 工作空间数据
 .workbuddy/
+
+# 极验截图产物（运行时生成，含验证码图片，不入库）
+.captcha_shots/
+
+# 本地视觉模型（约 12MB，用 README 里的命令自行下载）
+models/
+
+# 本机运行日志
+logs/
